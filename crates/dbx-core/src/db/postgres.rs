@@ -920,6 +920,15 @@ fn postgres_connection_url(url: &str) -> Result<PostgresConnectionUrl, String> {
             } else {
                 ssl_files.sslrootcert = Some(decoded);
             }
+        } else if key.eq_ignore_ascii_case("channel_binding") {
+            // channel_binding=require fails when the server does not offer
+            // SCRAM-SHA-256-PLUS (e.g. Neon). Normalize require→prefer so
+            // channel binding is used when available but does not cause a
+            // hard failure when the server doesn't support it.
+            match value.to_ascii_lowercase().as_str() {
+                "require" => kept_params.push("channel_binding=prefer".to_string()),
+                _ => kept_params.push(param.to_string()),
+            }
         } else if key.eq_ignore_ascii_case("sslmode") {
             match value.to_ascii_lowercase().as_str() {
                 "verify-ca" => {
@@ -2264,6 +2273,24 @@ mod tests {
         assert_eq!(parsed.url, "postgres://localhost/db?sslmode=require");
         assert!(!parsed.accepts_invalid_certs);
         assert!(!parsed.verifies_hostname);
+    }
+
+    #[test]
+    fn postgres_connection_url_normalizes_channel_binding_require_to_prefer() {
+        let parsed =
+            postgres_connection_url("postgres://localhost/db?sslmode=require&channel_binding=require").unwrap();
+
+        assert_eq!(parsed.url, "postgres://localhost/db?sslmode=require&channel_binding=prefer");
+        // The sanitized URL must be parseable by the driver
+        tokio_postgres::Config::from_str(&parsed.url).unwrap();
+    }
+
+    #[test]
+    fn postgres_connection_url_keeps_channel_binding_prefer() {
+        let parsed = postgres_connection_url("postgres://localhost/db?channel_binding=prefer").unwrap();
+
+        assert_eq!(parsed.url, "postgres://localhost/db?channel_binding=prefer");
+        tokio_postgres::Config::from_str(&parsed.url).unwrap();
     }
 
     #[test]
