@@ -765,19 +765,23 @@ pub fn format_grid_sql_literal(
     if value.is_null() {
         return "NULL".to_string();
     }
-    if is_mysql_bit_literal_column(database_type, column_info) {
-        if let Some(value) = value.as_bool() {
+    // Boolean values on BIT columns always use numeric 0/1.
+    // This covers MySQL, SQL Server, and any other database where BIT
+    // is a numeric/boolean type rather than a bit-string type like
+    // PostgreSQL's bit(n).
+    if let Some(value) = value.as_bool() {
+        if is_bit_literal_column(column_info) {
             return if value { "1" } else { "0" }.to_string();
         }
+        return if value { "TRUE" } else { "FALSE" }.to_string();
+    }
+    if is_mysql_bit_literal_column(database_type, column_info) {
         if let Some(number) = value.as_number() {
             return number.to_string();
         }
         if let Some(text) = value.as_str().and_then(format_mysql_bit_literal_text) {
             return text;
         }
-    }
-    if let Some(value) = value.as_bool() {
-        return if value { "TRUE" } else { "FALSE" }.to_string();
     }
     if let Some(number) = value.as_number() {
         return number.to_string();
@@ -817,6 +821,10 @@ pub fn format_grid_sql_literal(
 fn is_mysql_bit_literal_column(database_type: Option<DatabaseType>, column_info: Option<&DataGridColumnInfo>) -> bool {
     is_mysql_datetime_literal_database(database_type)
         && column_info.map(|column| is_bit_column_type(&column.data_type)).unwrap_or(false)
+}
+
+fn is_bit_literal_column(column_info: Option<&DataGridColumnInfo>) -> bool {
+    column_info.map(|column| is_bit_column_type(&column.data_type)).unwrap_or(false)
 }
 
 fn is_bit_column_type(data_type: &str) -> bool {
